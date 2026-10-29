@@ -9,7 +9,6 @@ import java.lang.reflect.Method;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XC_MethodReplacement;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
@@ -21,11 +20,17 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
  * mini app's requests cannot be captured on the wire. Instead we open the
  * Chromium DevTools socket for Telegram's WebViews and log every URL it loads,
  * so `Telegram.WebApp.initData` can be read over CDP from Termux.
+ *
+ * SAFETY: the hook must never run inside system_server. LSPosed's "System
+ * Framework" scope injects into system_server, where touching android.webkit
+ * WebView statics crashes the phone into a bootloop. Everything below is
+ * therefore gated on the process actually being Telegram's main process.
  */
 public class TGHook implements IXposedHookLoadPackage {
 
     private static final String TAG = "TGWA";
     private static final String FILE = "/data/local/tmp/tgwa.log";
+    private static final String PKG = "org.telegram.messenger";
 
     static synchronized void log(String s) {
         try {
@@ -41,9 +46,15 @@ public class TGHook implements IXposedHookLoadPackage {
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
         String p = lp.packageName;
-        if (p == null || !p.equals("org.telegram.messenger")) return;
+        if (p == null || !p.equals(PKG)) return;
 
-        log("hook loaded proc=" + lp.processName);
+        // SAFETY: only Telegram's own (main) process may touch WebView.
+        if (!PKG.equals(lpparam_process(lp))) {
+            log("skip non-main process: " + lpparam_process(lp));
+            return;
+        }
+
+        log("hook loaded proc=" + lpparam_process(lp));
 
         // 1) turn devtools on right now (covers views created later)
         try {
@@ -118,5 +129,14 @@ public class TGHook implements IXposedHookLoadPackage {
         } catch (Throwable t) { log("hook ctor failed: " + t); }
 
         log("armed");
+    }
+
+    private static String lpparam_process(XC_LoadPackage.LoadPackageParam lp) {
+        try {
+            Method m = lp.getClass().getMethod("getProcessName");
+            Object v = m.invoke(lp);
+            if (v != null) return String.valueOf(v);
+        } catch (Throwable ignored) { }
+        return lp.processName;
     }
 }
