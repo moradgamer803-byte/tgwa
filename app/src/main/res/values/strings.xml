@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TGWA</string>
+    <string name="xposed_description">Own-device Telegram WebView instrumentation (devtools + URL log) for capturing a mini app\'s own initData.</string>
+</resources>
